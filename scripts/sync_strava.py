@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 import requests
@@ -14,6 +14,7 @@ TOKEN_CACHE = ".strava_token.json"
 RAW_DIR = os.path.join("activities", "raw")
 SUMMARY_JSON = os.path.join("data", "last_sync_summary.json")
 SUMMARY_TXT = os.path.join("data", "last_sync_summary.txt")
+STATE_PATH = os.path.join("data", "backfill_state.json")
 
 
 class RateLimitExceeded(RuntimeError):
@@ -189,19 +190,45 @@ def _lookback_after_ts(years: int) -> int:
     return int(start.timestamp())
 
 
+def _start_after_ts(config: Dict) -> int:
+    sync_cfg = config.get("sync", {})
+    start_date = sync_cfg.get("start_date")
+    if start_date:
+        dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    lookback_years = int(sync_cfg.get("lookback_years", 5))
+    return _lookback_after_ts(lookback_years)
+
+
+def _activity_start_ts(activity: Dict) -> Optional[int]:
+    value = activity.get("start_date") or activity.get("start_date_local")
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        return int(datetime.fromisoformat(value).timestamp())
+    except ValueError:
+        return None
+
+
 def _fetch_page(
     token: str,
     per_page: int,
     page: int,
     after: int,
+    before: Optional[int],
     limiter: Optional[RateLimiter],
 ) -> List[Dict]:
     if limiter:
         limiter.before_request("read")
+    params = {"per_page": per_page, "page": page, "after": after}
+    if before is not None:
+        params["before"] = before
     resp = requests.get(
         "https://www.strava.com/api/v3/athlete/activities",
         headers={"Authorization": f"Bearer {token}"},
-        params={"per_page": per_page, "page": page, "after": after},
+        params=params,
         timeout=30,
     )
     if limiter:
@@ -227,6 +254,82 @@ def _write_activity(activity: Dict) -> bool:
     return True
 
 
+def _load_state() -> Dict:
+    if not os.path.exists(STATE_PATH):
+        return {}
+    try:
+        return read_json(STATE_PATH)
+    except Exception:
+        return {}
+
+
+def _save_state(state: Dict) -> None:
+    ensure_dir("data")
+    write_json(STATE_PATH, state)
+
+
+def _sync_recent(
+    token: str,
+    per_page: int,
+    recent_days: int,
+    limiter: RateLimiter,
+    dry_run: bool,
+) -> Dict:
+    if recent_days <= 0:
+        return {
+            "fetched": 0,
+            "new_or_updated": 0,
+            "oldest_ts": None,
+            "newest_ts": None,
+            "rate_limited": False,
+            "rate_limit_message": "",
+        }
+
+    after = int((utc_now() - timedelta(days=recent_days)).timestamp())
+    page = 1
+    total = 0
+    new_or_updated = 0
+    oldest_ts = None
+    newest_ts = None
+    rate_limited = False
+    rate_limit_message = ""
+    activity_ids = set()
+
+    while True:
+        try:
+            activities = _fetch_page(token, per_page, page, after, None, limiter)
+        except RateLimitExceeded as exc:
+            rate_limited = True
+            rate_limit_message = str(exc)
+            break
+        if not activities:
+            break
+        for activity in activities:
+            total += 1
+            ts = _activity_start_ts(activity)
+            if ts is not None:
+                oldest_ts = ts if oldest_ts is None else min(oldest_ts, ts)
+                newest_ts = ts if newest_ts is None else max(newest_ts, ts)
+            activity_id = activity.get("id")
+            if activity_id:
+                activity_ids.add(str(activity_id))
+            if dry_run:
+                continue
+            if _write_activity(activity):
+                new_or_updated += 1
+        page += 1
+
+    return {
+        "fetched": total,
+        "new_or_updated": new_or_updated,
+        "oldest_ts": oldest_ts,
+        "newest_ts": newest_ts,
+        "rate_limited": rate_limited,
+        "rate_limit_message": rate_limit_message,
+        "activity_ids": sorted(activity_ids),
+    }
+
+
 def sync_strava(dry_run: bool, prune_deleted: bool) -> Dict:
     config = load_config()
     rate_cfg = config.get("rate_limits", {}) or {}
@@ -242,36 +345,58 @@ def sync_strava(dry_run: bool, prune_deleted: bool) -> Dict:
     ensure_dir(RAW_DIR)
 
     per_page = int(config.get("sync", {}).get("per_page", 200))
-    lookback_years = int(config.get("sync", {}).get("lookback_years", 5))
-    after = _lookback_after_ts(lookback_years)
+    after = _start_after_ts(config)
+    recent_days = int(config.get("sync", {}).get("recent_days", 7))
+    resume_backfill = bool(config.get("sync", {}).get("resume_backfill", True))
+
+    recent_summary = _sync_recent(token, per_page, recent_days, limiter, dry_run)
 
     page = 1
     total = 0
     new_or_updated = 0
-    fetched_ids = set()
+    fetched_ids = set(recent_summary.get("activity_ids", []))
+    min_ts = None
+    max_ts = None
+    exhausted = False
+    before = None
 
-    rate_limited = False
-    rate_limit_message = ""
+    state = _load_state() if resume_backfill and not dry_run else {}
+    if state and state.get("completed"):
+        before = None
+    elif state and state.get("after") == after and state.get("next_before") is not None:
+        before = int(state["next_before"])
 
-    while True:
-        try:
-            activities = _fetch_page(token, per_page, page, after, limiter)
-        except RateLimitExceeded as exc:
-            rate_limited = True
-            rate_limit_message = str(exc)
-            break
-        if not activities:
-            break
-        for activity in activities:
-            total += 1
-            activity_id = activity.get("id")
-            if activity_id:
-                fetched_ids.add(str(activity_id))
-            if dry_run:
-                continue
-            if _write_activity(activity):
-                new_or_updated += 1
-        page += 1
+    if before is None:
+        before = int(utc_now().timestamp())
+
+    rate_limited = bool(recent_summary.get("rate_limited"))
+    rate_limit_message = recent_summary.get("rate_limit_message", "")
+
+    if not rate_limited:
+        while True:
+            try:
+                activities = _fetch_page(token, per_page, page, after, before, limiter)
+            except RateLimitExceeded as exc:
+                rate_limited = True
+                rate_limit_message = str(exc)
+                break
+            if not activities:
+                exhausted = True
+                break
+            for activity in activities:
+                total += 1
+                activity_id = activity.get("id")
+                if activity_id:
+                    fetched_ids.add(str(activity_id))
+                ts = _activity_start_ts(activity)
+                if ts is not None:
+                    min_ts = ts if min_ts is None else min(min_ts, ts)
+                    max_ts = ts if max_ts is None else max(max_ts, ts)
+                if dry_run:
+                    continue
+                if _write_activity(activity):
+                    new_or_updated += 1
+            page += 1
 
     deleted = 0
     if prune_deleted and not dry_run:
@@ -283,13 +408,41 @@ def sync_strava(dry_run: bool, prune_deleted: bool) -> Dict:
                 os.remove(os.path.join(RAW_DIR, filename))
                 deleted += 1
 
+    completed = exhausted and not rate_limited
+    next_before = None
+    if not completed and min_ts is not None:
+        next_before = int(min_ts + 1)
+
+    if not dry_run:
+        if rate_limited and min_ts is None and state:
+            state_update = dict(state)
+            state_update["rate_limited"] = True
+            state_update["last_run_utc"] = utc_now().isoformat()
+        else:
+            state_update = {
+                "after": after,
+                "next_before": next_before,
+                "completed": completed,
+                "oldest_seen_ts": min_ts,
+                "newest_seen_ts": max_ts,
+                "rate_limited": rate_limited,
+                "last_run_utc": utc_now().isoformat(),
+            }
+        _save_state(state_update)
+
+    total_fetched = total + int(recent_summary.get("fetched", 0))
+    total_new_or_updated = new_or_updated + int(recent_summary.get("new_or_updated", 0))
+
     summary = {
-        "fetched": total,
-        "new_or_updated": new_or_updated,
+        "fetched": total_fetched,
+        "new_or_updated": total_new_or_updated,
         "deleted": deleted,
-        "lookback_years": lookback_years,
+        "lookback_start_ts": after,
         "timestamp_utc": utc_now().isoformat(),
         "rate_limited": rate_limited,
+        "backfill_completed": completed,
+        "backfill_next_before": next_before,
+        "recent_sync": recent_summary,
     }
     if rate_limited:
         summary["rate_limit_message"] = rate_limit_message
@@ -316,9 +469,15 @@ def main() -> int:
     ensure_dir("data")
     if not args.dry_run:
         write_json(SUMMARY_JSON, summary)
+        start_ts = summary.get("lookback_start_ts")
+        if start_ts:
+            start_label = datetime.fromtimestamp(start_ts, tz=timezone.utc).date().isoformat()
+            range_label = f"start {start_label}"
+        else:
+            range_label = "start unknown"
         message = (
             f"Sync Strava: {summary['new_or_updated']} new/updated, "
-            f"{summary['deleted']} deleted (lookback {summary['lookback_years']}y)"
+            f"{summary['deleted']} deleted ({range_label})"
         )
         if summary.get("rate_limited"):
             message += " [rate limited]"

@@ -26,10 +26,19 @@ PADDING = 16
 COLORS = ["#ebedf0", "#c6e48b", "#7bc96f", "#239a3b", "#196127"]
 
 
-def _year_range(lookback_years: int) -> List[int]:
+def _year_range_from_config(config: Dict) -> List[int]:
+    sync_cfg = config.get("sync", {})
     current_year = utc_now().year
-    start = current_year - lookback_years + 1
-    return list(range(start, current_year + 1))
+    start_date = sync_cfg.get("start_date")
+    if start_date:
+        try:
+            start_year = int(start_date.split("-")[0])
+        except (ValueError, IndexError):
+            start_year = current_year
+    else:
+        lookback_years = int(sync_cfg.get("lookback_years", 5))
+        start_year = current_year - lookback_years + 1
+    return list(range(start_year, current_year + 1))
 
 
 def _monday_on_or_before(d: date) -> date:
@@ -181,7 +190,6 @@ def _write_site_data(payload: Dict) -> None:
 
 def generate():
     config = load_config()
-    lookback_years = int(config.get("sync", {}).get("lookback_years", 5))
     types = config.get("activities", {}).get("types", []) or []
 
     units = config.get("units", {})
@@ -191,7 +199,7 @@ def generate():
     }
 
     aggregates = read_json(AGG_PATH)
-    years = _year_range(lookback_years)
+    years = _year_range_from_config(config)
 
     normalized = read_json(NORM_PATH) if os.path.exists(NORM_PATH) else []
     id_to_url = {int(item["id"]): item.get("strava_url") for item in normalized}

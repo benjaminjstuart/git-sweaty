@@ -42,6 +42,9 @@ Base settings live in `config.yaml`. Put secrets in `config.local.yaml`.
 
 Key options:
 - `sync.lookback_years` (default 5)
+- `sync.start_date` (YYYY-MM-DD, overrides lookback_years)
+- `sync.recent_days` (sync recent activities even while backfilling)
+- `sync.resume_backfill` (persist cursor to continue older pages across days)
 - `activities.types` (activity types to include)
 - `activities.type_aliases` (map Strava types to your canonical types)
 - `units.distance` (`mi` or `km`)
@@ -62,7 +65,7 @@ Then enable the scheduled workflow in `.github/workflows/sync.yml`.
 - `activities/raw/` contains raw Strava payloads. Keep or prune based on your privacy needs.
 - SVGs are deterministic and contain `<title>` tooltips for hover details.
 - README updates automatically between `<!-- HEATMAPS:START -->` and `<!-- HEATMAPS:END -->`.
-- The sync script rate-limits to free Strava API caps (100 read / 15 min, 1,000 read daily). Initial backfill may take multiple days; re-run the pipeline until complete.
+- The sync script rate-limits to free Strava API caps (200 overall / 15 min, 2,000 overall daily; 100 read / 15 min, 1,000 read daily). Initial backfill may take multiple days; the cursor is stored in `data/backfill_state.json` and resumes automatically on the next run.
 
 <!-- HEATMAPS:START -->
 ## Heatmaps
