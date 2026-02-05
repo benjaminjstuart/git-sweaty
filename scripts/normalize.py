@@ -83,7 +83,9 @@ def normalize() -> List[Dict]:
     group_aliases = activities_cfg.get("group_aliases", {}) or {}
     featured_set = set(featured_types)
 
-    existing = _load_existing() if not os.path.exists(RAW_DIR) else {}
+    # In CI, activities/raw is ephemeral per run, so keep persisted normalized
+    # history and overlay any newly fetched raw activities.
+    existing = _load_existing()
 
     if os.path.exists(RAW_DIR):
         for filename in sorted(os.listdir(RAW_DIR)):
