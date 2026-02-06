@@ -3,7 +3,7 @@
 Sync Strava activities, normalize and aggregate them, and generate GitHub-style calendar heatmaps (SVG) per workout type/year. A single preview is shown in this README, with the full interactive view on GitHub Pages.
 
 - Live site: [Interactive Heatmaps](https://aspain.github.io/git-sweaty/)
-- Note: The GitHub Pages site is optimized for responsive desktop/mobile viewing.
+- For forks, this link is auto-updated to your own GitHub Pages URL after your first successful sync run.
 
 <!-- HEATMAPS:START -->
 Preview:
@@ -14,6 +14,11 @@ Preview:
 ## Strava App Setup
 
 Create a Strava API application at [Strava API Settings](https://www.strava.com/settings/api). Use `localhost` for the **Authorization Callback Domain**.
+After creating the app, copy only:
+- `STRAVA_CLIENT_ID`
+- `STRAVA_CLIENT_SECRET`
+
+Do not copy a refresh token from the Strava app page; you will generate `STRAVA_REFRESH_TOKEN` in the next step.
 
 ## Quick start (GitHub Actions only)
 
@@ -45,7 +50,9 @@ Copy the `refresh_token` from the response.
 - `STRAVA_REFRESH_TOKEN` (from the OAuth exchange above)
 
 3. Run the workflow:
+If GitHub shows an **Enable workflows** button in the Actions tab, click it first.
 Go to **Actions → Sync Strava Heatmaps → Run workflow**.
+The same workflow is also scheduled in `.github/workflows/sync.yml` (daily at `06:00 UTC`).
 
 This will:
 - sync raw activities into `activities/raw/` (local-only; not committed)
@@ -53,7 +60,6 @@ This will:
 - aggregate into `data/daily_aggregates.json`
 - generate SVGs in `heatmaps/`
 - build `site/data.json`
-- commit the changes (one commit per run)
 
 ## GitHub Pages setup
 
@@ -64,11 +70,11 @@ This will:
 
 ## Configuration
 
-Base settings live in `config.yaml`. Secrets are injected by GitHub Actions at runtime (no local `config.local.yaml` needed).
+Base settings live in `config.yaml`.
 
 Key options:
-- `sync.lookback_years` (default 5)
-- `sync.start_date` (YYYY-MM-DD, overrides lookback_years)
+- `sync.start_date` (default `2019-01-01`; currently set and overrides `sync.lookback_years`)
+- `sync.lookback_years` (default 5; used only when `sync.start_date` is unset)
 - `sync.recent_days` (sync recent activities even while backfilling)
 - `sync.resume_backfill` (persist cursor to continue older pages across days)
 - `activities.types` (featured activity types shown first in UI)
@@ -81,17 +87,9 @@ Key options:
 - `units.elevation` (`ft` or `m`)
 - `rate_limits.*` (free Strava API throttling caps)
 
-## GitHub Actions
-
-Add secrets to your repo:
-- `STRAVA_CLIENT_ID`
-- `STRAVA_CLIENT_SECRET`
-- `STRAVA_REFRESH_TOKEN`
-
-Then enable the scheduled workflow in `.github/workflows/sync.yml`.
-
 ## Notes
 
 - Raw activities are stored locally for processing but are not committed (`activities/raw/` is ignored). This prevents publishing detailed per‑activity payloads and gps location traces.
 - On first run for a new athlete, the workflow auto-resets persisted outputs (`data/*.json`, `heatmaps/`, `site/data.json`) to avoid mixing data across forks. A fingerprint-only file is stored at `data/athletes.json` and does not include athlete IDs or profile data.
-- The sync script rate-limits to free Strava API caps (200 overall / 15 min, 2,000 overall daily; 100 read / 15 min, 1,000 read daily). Initial backfill may take multiple days; the cursor is stored in `data/backfill_state.json` and resumes automatically. Once backfill is complete, only the recent sync runs.
+- The sync script rate-limits to free Strava API caps (200 overall / 15 min, 2,000 overall daily; 100 read / 15 min, 1,000 read daily). The cursor is stored in `data/backfill_state.json` and resumes automatically. Once backfill is complete, only the recent sync runs.
+- The GitHub Pages site is optimized for responsive desktop/mobile viewing.
