@@ -9239,6 +9239,18 @@
       "hour": 13,
       "type": "Ride",
       "year": 2026
+    },
+    {
+      "date": "2026-05-11",
+      "hour": 11,
+      "type": "OtherSports",
+      "year": 2026
+    },
+    {
+      "date": "2026-05-11",
+      "hour": 12,
+      "type": "Ride",
+      "year": 2026
     }
   ],
   "aggregates": {
@@ -18401,6 +18413,15 @@
           "distance": 1216.4,
           "elevation_gain": 9.0,
           "moving_time": 1315.0
+        },
+        "2026-05-11": {
+          "activity_ids": [
+            18465069229
+          ],
+          "count": 1,
+          "distance": 1799.3,
+          "elevation_gain": 23.0,
+          "moving_time": 1421.0
         }
       },
       "Ride": {
@@ -19001,11 +19022,20 @@
           "distance": 34098.2,
           "elevation_gain": 157.0,
           "moving_time": 3950.0
+        },
+        "2026-05-11": {
+          "activity_ids": [
+            18466368684
+          ],
+          "count": 1,
+          "distance": 6815.9,
+          "elevation_gain": 74.0,
+          "moving_time": 654.0
         }
       }
     }
   },
-  "generated_at": "2026-05-11T09:50:58.198374+00:00",
+  "generated_at": "2026-05-12T08:47:41.917434+00:00",
   "type_meta": {
     "OtherSports": {
       "accent": "#f5c2ff",
