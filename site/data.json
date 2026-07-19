@@ -9605,6 +9605,12 @@
       "hour": 10,
       "type": "OtherSports",
       "year": 2026
+    },
+    {
+      "date": "2026-07-18",
+      "hour": 6,
+      "type": "Ride",
+      "year": 2026
     }
   ],
   "aggregates": {
@@ -19812,11 +19818,20 @@
           "distance": 6999.0,
           "elevation_gain": 40.0,
           "moving_time": 1504.0
+        },
+        "2026-07-18": {
+          "activity_ids": [
+            19362032274
+          ],
+          "count": 1,
+          "distance": 33830.9,
+          "elevation_gain": 269.0,
+          "moving_time": 4369.0
         }
       }
     }
   },
-  "generated_at": "2026-07-18T07:59:50.722517+00:00",
+  "generated_at": "2026-07-19T08:26:07.270313+00:00",
   "type_meta": {
     "OtherSports": {
       "accent": "#f5c2ff",
